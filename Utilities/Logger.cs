@@ -15,172 +15,207 @@ using System.IO;
 using System.Linq;
 using OpenHardwareMonitor.Hardware;
 
-namespace OpenHardwareMonitor.Utilities {
-  public class Logger {
+namespace OpenHardwareMonitor.Utilities
+{
+    public class Logger
+    {
 
-    private const string fileNameFormat = 
-      "OpenHardwareMonitorLog-{0:yyyy-MM-dd}.csv";
+        private const string fileNameFormat =
+          "OpenHardwareMonitorLog-{0:yyyy-MM-dd}.csv";
 
-    private readonly IComputer computer;
+        private readonly IComputer computer;
 
-    private DateTime day = DateTime.MinValue;
-    private string fileName;
-    private string[] identifiers;
-    private ISensor[] sensors;
+        private DateTime day = DateTime.MinValue;
+        private string fileName;
+        private string[] identifiers;
+        private ISensor[] sensors;
 
-    private DateTime lastLoggedTime = DateTime.MinValue;
+        private DateTime lastLoggedTime = DateTime.MinValue;
 
-    public Logger(IComputer computer) {
-      this.computer = computer;
-      this.computer.HardwareAdded += HardwareAdded;
-      this.computer.HardwareRemoved += HardwareRemoved;      
-    }
-
-    private void HardwareRemoved(IHardware hardware) {
-      hardware.SensorAdded -= SensorAdded;
-      hardware.SensorRemoved -= SensorRemoved;
-      foreach (ISensor sensor in hardware.Sensors)
-        SensorRemoved(sensor);
-      foreach (IHardware subHardware in hardware.SubHardware)
-        HardwareRemoved(subHardware);
-    }
-
-    private void HardwareAdded(IHardware hardware) {
-      foreach (ISensor sensor in hardware.Sensors)
-        SensorAdded(sensor);
-      hardware.SensorAdded += SensorAdded;
-      hardware.SensorRemoved += SensorRemoved;
-      foreach (IHardware subHardware in hardware.SubHardware)
-        HardwareAdded(subHardware);
-    }
-
-    private void SensorAdded(ISensor sensor) {
-      if (sensors == null)
-        return;
-
-      for (int i = 0; i < sensors.Length; i++) {
-        if (sensor.Identifier.ToString() == identifiers[i])
-          sensors[i] = sensor;
-      }
-    }
-
-    private void SensorRemoved(ISensor sensor) {
-      if (sensors == null)
-        return;
-
-      for (int i = 0; i < sensors.Length; i++) {
-        if (sensor == sensors[i])
-          sensors[i] = null;
-      }
-    }
-
-    private static string GetFileName(DateTime date) {
-      return AppDomain.CurrentDomain.BaseDirectory +
-        Path.DirectorySeparatorChar + string.Format(fileNameFormat, date);
-    }
-
-    private bool OpenExistingLogFile() {
-      if (!File.Exists(fileName))
-        return false;
-
-      try {
-        String line;
-        using (StreamReader reader = new StreamReader(fileName)) 
-          line = reader.ReadLine(); 
-       
-        if (string.IsNullOrEmpty(line))
-          return false;
-        
-        identifiers = line.Split(',').Skip(1).ToArray();
-      } catch {
-        identifiers = null;
-        return false;
-      }
-
-      if (identifiers.Length == 0) {
-        identifiers = null;
-        return false;
-      }
-
-      sensors = new ISensor[identifiers.Length];
-      SensorVisitor visitor = new SensorVisitor(sensor => {
-        for (int i = 0; i < identifiers.Length; i++)
-          if (sensor.Identifier.ToString() == identifiers[i])
-            sensors[i] = sensor;
-      });
-      visitor.VisitComputer(computer);
-      return true;
-    }
-
-    private void CreateNewLogFile() {
-      IList<ISensor> list = new List<ISensor>();
-      SensorVisitor visitor = new SensorVisitor(sensor => {
-        list.Add(sensor);
-      });
-      visitor.VisitComputer(computer);
-      sensors = list.ToArray();
-      identifiers = sensors.Select(s => s.Identifier.ToString()).ToArray();
-
-      using (StreamWriter writer = new StreamWriter(fileName, false)) {
-        writer.Write(",");
-        for (int i = 0; i < sensors.Length; i++) {
-          writer.Write(sensors[i].Identifier);
-          if (i < sensors.Length - 1)
-            writer.Write(",");
-          else
-            writer.WriteLine();
+        public Logger(IComputer computer)
+        {
+            this.computer = computer;
+            this.computer.HardwareAdded += HardwareAdded;
+            this.computer.HardwareRemoved += HardwareRemoved;
         }
 
-        writer.Write("Time,");
-        for (int i = 0; i < sensors.Length; i++) {
-          writer.Write('"');
-          writer.Write(sensors[i].Name);
-          writer.Write('"');
-          if (i < sensors.Length - 1)
-            writer.Write(",");
-          else
-            writer.WriteLine();
+        private void HardwareRemoved(IHardware hardware)
+        {
+            hardware.SensorAdded -= SensorAdded;
+            hardware.SensorRemoved -= SensorRemoved;
+            foreach (ISensor sensor in hardware.Sensors)
+                SensorRemoved(sensor);
+            foreach (IHardware subHardware in hardware.SubHardware)
+                HardwareRemoved(subHardware);
         }
-      }
-    }
 
-    public TimeSpan LoggingInterval { get; set; }
-
-    public void Log() {      
-      var now = DateTime.Now;
-
-      if (lastLoggedTime + LoggingInterval - new TimeSpan(5000000) > now)
-        return;      
-
-      if (day != now.Date || !File.Exists(fileName)) {
-        day = now.Date;
-        fileName = GetFileName(day);
-
-        if (!OpenExistingLogFile())
-          CreateNewLogFile();
-      }
-
-      try {
-        using (StreamWriter writer = new StreamWriter(new FileStream(fileName,
-          FileMode.Append, FileAccess.Write, FileShare.ReadWrite))) {
-          writer.Write(now.ToString("G", CultureInfo.InvariantCulture));
-          writer.Write(",");
-          for (int i = 0; i < sensors.Length; i++) {
-            if (sensors[i] != null) {
-              float? value = sensors[i].Value;
-              if (value.HasValue)
-                writer.Write(
-                  value.Value.ToString("R", CultureInfo.InvariantCulture));
+        private void HardwareAdded(IHardware hardware)
+        {
+            foreach (ISensor sensor in hardware.Sensors)
+            {
+                SensorAdded(sensor);
             }
-            if (i < sensors.Length - 1)
-              writer.Write(",");
-            else
-              writer.WriteLine();
-          }
+            hardware.SensorAdded += SensorAdded;
+            hardware.SensorRemoved += SensorRemoved;
+            foreach (IHardware subHardware in hardware.SubHardware)
+                HardwareAdded(subHardware);
         }
-      } catch (IOException) { }
 
-      lastLoggedTime = now;
+        private void SensorAdded(ISensor sensor)
+        {
+            if(!sensor.Identifier.ToString().Contains("temperature") || !sensor.Identifier.ToString().Contains("cpu"))
+            {
+                return;
+            }
+            if (sensors == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < sensors.Length; i++)
+            {
+                if (sensor.Identifier.ToString() == identifiers[i])
+                    sensors[i] = sensor;
+            }
+        }
+
+        private void SensorRemoved(ISensor sensor)
+        {
+            if (sensors == null)
+                return;
+
+            for (int i = 0; i < sensors.Length; i++)
+            {
+                if (sensor == sensors[i])
+                    sensors[i] = null;
+            }
+        }
+
+        private static string GetFileName(DateTime date)
+        {
+            return AppDomain.CurrentDomain.BaseDirectory +
+              Path.DirectorySeparatorChar + string.Format(fileNameFormat, date);
+        }
+
+        private bool OpenExistingLogFile()
+        {
+            if (!File.Exists(fileName))
+                return false;
+
+            try
+            {
+                String line;
+                using (StreamReader reader = new StreamReader(fileName))
+                    line = reader.ReadLine();
+
+                if (string.IsNullOrEmpty(line))
+                    return false;
+
+                identifiers = line.Split(',').Skip(1).ToArray();
+            }
+            catch
+            {
+                identifiers = null;
+                return false;
+            }
+
+            if (identifiers.Length == 0)
+            {
+                identifiers = null;
+                return false;
+            }
+
+            sensors = new ISensor[identifiers.Length];
+            SensorVisitor visitor = new SensorVisitor(sensor =>
+            {
+                for (int i = 0; i < identifiers.Length; i++)
+                    if (sensor.Identifier.ToString() == identifiers[i])
+                        sensors[i] = sensor;
+            });
+            visitor.VisitComputer(computer);
+            return true;
+        }
+
+        private void CreateNewLogFile()
+        {
+            IList<ISensor> list = new List<ISensor>();
+            SensorVisitor visitor = new SensorVisitor(sensor =>
+            {
+                list.Add(sensor);
+            });
+            visitor.VisitComputer(computer);
+            sensors = list.ToArray();
+            identifiers = sensors.Select(s => s.Identifier.ToString()).ToArray();
+
+            using (StreamWriter writer = new StreamWriter(fileName, false))
+            {
+                for (int c = 0; c < sensors.Length; c++)
+                {
+                    if (sensors[c] != null && sensors[c].SensorType == SensorType.Temperature && sensors[c].Identifier.ToString().Contains("cpu"))
+                    {
+                        writer.Write(sensors[c].Identifier.ToString() + ",");
+                    }
+                }
+
+                writer.WriteLine();
+            }
+        }
+
+        public TimeSpan LoggingInterval { get; set; }
+
+        public void Log()
+        {
+            var now = DateTime.Now;
+
+            if (lastLoggedTime + LoggingInterval - new TimeSpan(5000000) > now)
+                return;
+
+            if (day != now.Date || !File.Exists(fileName))
+            {
+                day = now.Date;
+                fileName = GetFileName(day);
+
+                if (!OpenExistingLogFile())
+                    CreateNewLogFile();
+            }
+
+            try
+            {
+                using (StreamWriter writer = new StreamWriter(new FileStream(fileName,
+                  FileMode.Append, FileAccess.Write, FileShare.ReadWrite)))
+                {
+                    List<float> values = new List<float>();
+
+
+                    for (int i = 0; i < sensors.Length; i++)
+                    {
+                        if (sensors[i] != null && sensors[i].SensorType == SensorType.Temperature && sensors[i].Identifier.ToString().Contains("cpu"))
+                        {
+                            float? value = sensors[i].Value;
+                            if (value.HasValue)
+                            {
+                                values.Add(value.Value);
+                            }
+                        }
+                    }
+                    if (values.Count > 0)
+                    {
+                        writer.Write(values[0].ToString("R", CultureInfo.InvariantCulture));
+                        foreach (float val in values.GetRange(1, values.Count - 1))
+                        {
+                            writer.Write(",");
+                            writer.Write(val.ToString("R", CultureInfo.InvariantCulture));
+                        }
+                        writer.WriteLine();
+                    } else
+                    {
+                        int b = 1;
+                    }
+                }
+            }
+            catch (IOException) { }
+
+            lastLoggedTime = now;
+        }
     }
-  }
 }
